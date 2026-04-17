@@ -1,0 +1,163 @@
+# ==============================================================
+# docker-compose.yml
+#
+# WHAT THIS FILE DOES:
+#   Defines three services (containers) that work together:
+#     1. db       — PostgreSQL database
+#     2. app      — your FastAPI application
+#     3. pgadmin  — browser-based database GUI
+#
+# CONCEPT — Services:
+# Each "service" in Docker Compose is one container.
+# Compose handles networking automatically — containers
+# can reach each other by their service name.
+# That is why POSTGRES_HOST=db works: "db" is the service name.
+#
+# HOW TO USE:
+#   Start all containers:  docker compose up -d
+#   View logs:             docker compose logs -f app
+#   Stop all:              docker compose down
+#   Rebuild after changes: docker compose up -d --build
+# ==============================================================
+
+services:
+
+  # ============================================================
+  # SERVICE 1: PostgreSQL Database
+  # ============================================================
+  db:
+    image: postgres:16-alpine
+    # CONCEPT — alpine images:
+    # The "-alpine" variant is based on Alpine Linux — a minimal
+    # Linux distribution. The image is ~10x smaller than the
+    # standard postgres image. Less storage, faster pulls.
+
+    container_name: network_asset_db
+
+    environment:
+      # These environment variables configure PostgreSQL on first boot
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      # CONCEPT — ${VARIABLE} syntax:
+      # Docker Compose reads these values from your .env file
+      # automatically. This keeps secrets out of this file.
+
+    volumes:
+      # CONCEPT — Named volumes:
+      # Without this, ALL your data disappears when the container stops.
+      # This volume persists the PostgreSQL data files on your host machine.
+      # "postgres_data:/var/lib/postgresql/data" means:
+      #   host volume "postgres_data" → container path "/var/lib/postgresql/data"
+      - postgres_data:/var/lib/postgresql/data
+
+    ports:
+      # Map port 5432 on your host → port 5432 in the container
+      # This lets you connect to PostgreSQL from your laptop
+      # using a tool like DBeaver or psql directly.
+      - "5432:5432"
+
+    healthcheck:
+      # CONCEPT — Health checks:
+      # Docker runs this command inside the container periodically.
+      # pg_isready checks if PostgreSQL is accepting connections.
+      # The app service uses this to wait before starting.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s     # Check every 5 seconds
+      timeout: 5s      # Give up if no response in 5 seconds
+      retries: 5       # Mark as unhealthy after 5 failed checks
+
+    restart: unless-stopped
+    # CONCEPT — restart policies:
+    # "unless-stopped" means: restart automatically if the container
+    # crashes, but NOT if you manually stop it with `docker stop`.
+
+
+  # ============================================================
+  # SERVICE 2: FastAPI Application
+  # ============================================================
+  app:
+    build:
+      context: .          # Build from the current directory
+      dockerfile: Dockerfile
+
+    container_name: network_asset_app
+
+    environment:
+      # Pass all our config variables into the container
+      APP_NAME: ${APP_NAME}
+      DEBUG: ${DEBUG}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_HOST: db        # Use the service name, not localhost
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB}
+      SECRET_KEY: ${SECRET_KEY}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES}
+
+    ports:
+      - "8000:8000"    # Your API is accessible at http://localhost:8000
+
+    depends_on:
+      db:
+        condition: service_healthy
+    # CONCEPT — depends_on with condition:
+    # "service_healthy" means: do not start the app until
+    # the db container passes its health check.
+    # Without this, the app might start before PostgreSQL is
+    # ready and immediately crash trying to connect.
+
+    volumes:
+      # CONCEPT — Bind mount for development:
+      # This mounts your local code directory into the container.
+      # Changes you make in VS Code are instantly reflected
+      # inside the container — no rebuild needed.
+      # Remove this in production (use the built image only).
+      - .:/app
+
+    command: >
+      sh -c "
+        echo 'Running database migrations...' &&
+        alembic upgrade head &&
+        echo 'Starting server...' &&
+        uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      "
+    # CONCEPT — command override:
+    # This overrides the CMD in the Dockerfile.
+    # We run migrations FIRST (alembic upgrade head) to make sure
+    # the database schema is up to date, THEN start the server.
+    # --reload enables auto-restart on code changes (development only).
+
+    restart: unless-stopped
+
+
+  # ============================================================
+  # SERVICE 3: pgAdmin — Database GUI
+  # ============================================================
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: network_asset_pgadmin
+
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+
+    ports:
+      - "5050:80"     # Access pgAdmin at http://localhost:5050
+
+    depends_on:
+      - db
+
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+
+    restart: unless-stopped
+
+
+# ============================================================
+# NAMED VOLUMES
+# These are managed by Docker. Data persists between restarts.
+# ============================================================
+volumes:
+  postgres_data:
+  pgadmin_data:

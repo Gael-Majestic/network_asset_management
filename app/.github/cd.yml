@@ -1,0 +1,116 @@
+# ==============================================================
+# .github/workflows/cd.yml
+#
+# WHAT THIS DOES:
+#   Deploys to AWS ECS automatically when code is pushed to main.
+#
+# CONCEPT — Continuous Deployment flow:
+#   1. Build the Docker image from the Dockerfile
+#   2. Push the image to AWS ECR (Elastic Container Registry)
+#      ECR is AWS's private Docker image storage.
+#   3. Update the ECS task definition to use the new image
+#   4. Deploy the new task definition to ECS
+#      ECS replaces the old containers with new ones — zero downtime.
+#
+# CONCEPT — GitHub Secrets:
+#   Sensitive values (AWS keys, account ID) are stored as
+#   GitHub repository secrets, not in this file.
+#   Go to: GitHub repo → Settings → Secrets and variables → Actions
+#   Add these secrets:
+#     AWS_ACCESS_KEY_ID      → your IAM user access key
+#     AWS_SECRET_ACCESS_KEY  → your IAM user secret key
+#   They are referenced as ${{ secrets.SECRET_NAME }}
+# ==============================================================
+
+name: CD — Deploy to AWS ECS
+
+# Only runs when code is pushed/merged to main
+on:
+  push:
+    branches: ["main"]
+
+env:
+  AWS_REGION: af-south-1
+  ECR_REPOSITORY: network-asset-api         # Your ECR repository name
+  ECS_CLUSTER: network-asset-cluster        # Your ECS cluster name
+  ECS_SERVICE: network-asset-service        # Your ECS service name
+  CONTAINER_NAME: network-asset-app         # Container name in task definition
+
+jobs:
+  deploy:
+    name: Build and deploy
+    runs-on: ubuntu-latest
+
+    # CONCEPT — permissions:
+    # id-token: write is required for OIDC authentication with AWS.
+    # contents: read allows the job to read your repository.
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # CONCEPT — AWS credentials:
+      # We configure AWS CLI with your access keys from GitHub Secrets.
+      # After this step, all AWS CLI commands in this job are authenticated.
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Log in to AWS ECR so we can push our Docker image
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # CONCEPT — Image tagging with git SHA:
+      # We tag each image with the git commit SHA (a unique hash).
+      # This means every deployment has a unique image tag.
+      # If something goes wrong, you can roll back to a previous SHA.
+      # "latest" tag is also applied for convenience.
+      - name: Build, tag, and push image to ECR
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      # Download the current ECS task definition JSON
+      - name: Download current task definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition network-asset-task \
+            --query taskDefinition \
+            > task-definition.json
+
+      # Update the task definition to use the new image
+      - name: Update ECS task definition with new image
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: ${{ env.CONTAINER_NAME }}
+          image: ${{ steps.build-image.outputs.image }}
+
+      # CONCEPT — ECS deployment:
+      # This step registers the new task definition and updates
+      # the ECS service to use it.
+      # wait-for-service-stability: true means this step waits
+      # until ECS has fully deployed (all old containers replaced).
+      # If deployment fails, this step fails and alerts you.
+      - name: Deploy to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true

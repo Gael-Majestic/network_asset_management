@@ -1,0 +1,76 @@
+# ==============================================================
+# .github/workflows/ci.yml
+#
+# WHAT THIS DOES:
+#   Runs automatically on every push and pull request.
+#   Installs dependencies, runs all tests.
+#   If any test fails, the pipeline fails — the team is notified.
+#
+# CONCEPT — Continuous Integration:
+#   The goal is to catch bugs BEFORE they reach main.
+#   Every developer's push triggers this pipeline.
+#   Green = safe to merge. Red = something broke, fix it.
+# ==============================================================
+
+name: CI — Run Tests
+
+# CONCEPT — on: triggers
+# This pipeline runs on two events:
+#   push: any push to any branch
+#   pull_request: when someone opens a PR targeting main
+on:
+  push:
+    branches: ["**"]         # Every branch
+  pull_request:
+    branches: ["main"]       # PRs targeting main only
+
+jobs:
+  test:
+    name: Run tests
+    runs-on: ubuntu-latest   # GitHub provides this Ubuntu VM for free
+
+    steps:
+      # CONCEPT — actions/checkout:
+      # This step clones your repository into the GitHub VM.
+      # Without it, the VM has no code to work with.
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Set up the correct Python version
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # CONCEPT — pip cache:
+      # Caching the pip packages means subsequent runs skip
+      # re-downloading packages that have not changed.
+      # This makes the pipeline significantly faster.
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      # Install all dependencies
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # CONCEPT — Environment variables for tests:
+      # Our app reads settings from environment variables.
+      # We set dummy values here — the tests use SQLite,
+      # so the Postgres values are never actually used.
+      # SECRET_KEY must be set because it has no default.
+      - name: Run tests
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_DB: test_db
+          SECRET_KEY: "ci-test-secret-key-not-used-in-production"
+          DEBUG: "false"
+        run: pytest -v
+        # -v = verbose: show each test name and result
