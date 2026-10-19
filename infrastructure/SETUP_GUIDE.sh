@@ -42,8 +42,8 @@ ssh-keygen -t rsa -b 4096 -f ~/.ssh/dev-vm-key
 # STEP 3 — RUN TERRAFORM
 # ============================================================
 
-# Go into the project folder
-cd network-asset-vm
+# Go into the Terraform folder
+cd infrastructure
 
 # Initialise Terraform (downloads the AWS provider)
 terraform init
@@ -51,8 +51,9 @@ terraform init
 # Preview what Terraform will create (nothing is created yet)
 terraform plan
 
-# Create the VM (type "yes" when prompted)
-terraform apply
+# Create the VM (type "yes" when prompted). admin_cidr is your own public IP:
+# only that address can reach SSH, RDP, the API port and pgAdmin.
+terraform apply -var "admin_cidr=$(curl -s https://checkip.amazonaws.com)/32"
 
 # When done, Terraform prints your VM's public IP and SSH command.
 
@@ -99,12 +100,12 @@ cat /var/log/user-data.log
 #   Open "Remote Desktop Connection" (built into Windows)
 #   Computer: YOUR_VM_IP
 #   Username: ubuntu
-#   Password: ChangeMe123!   ← change this after first login!
+#   Password: the one you set after your first SSH login with `sudo passwd ubuntu`
 
 # On Mac:
 #   Install "Microsoft Remote Desktop" from the App Store
 #   Add a new PC: YOUR_VM_IP
-#   Username: ubuntu / Password: ChangeMe123!
+#   Username: ubuntu / Password: the one you set with `sudo passwd ubuntu`
 
 # You will see the XFCE desktop — a full Linux GUI.
 # Use this to explore the file manager, terminal, and settings visually.

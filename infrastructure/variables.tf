@@ -17,3 +17,14 @@ variable "ubuntu_ami" {
   # https://cloud-images.ubuntu.com/locator/ec2/
   default = "ami-0ec10929233384c7f"
 }
+
+variable "admin_cidr" {
+  description = "Your public IP address in CIDR form, e.g. 203.0.113.10/32. Only this address can reach SSH, RDP, the API port and pgAdmin."
+  type        = string
+}
+
+variable "ssh_public_key_path" {
+  description = "Path to the SSH public key uploaded to AWS"
+  type        = string
+  default     = "~/.ssh/dev-vm-key.pub"
+}

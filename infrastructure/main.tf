@@ -21,7 +21,7 @@ provider "aws" {
 # -------------------------------------------------------
 resource "aws_key_pair" "dev_vm_key" {
   key_name   = "dev-vm-key"
-  public_key = file("c:/Users/Hp/dev-vm-key.pub") # Change this path if your SSH key is stored elsewhere
+  public_key = file(pathexpand(var.ssh_public_key_path))
 }
 
 # -------------------------------------------------------
@@ -29,7 +29,7 @@ resource "aws_key_pair" "dev_vm_key" {
 # -------------------------------------------------------
 resource "aws_security_group" "dev_vm_sg" {
   name        = "dev-vm-sg"
-  description = "Allow SSH, HTTP, HTTPS and app ports"
+  description = "HTTP and HTTPS from anywhere; SSH, RDP, API and pgAdmin from admin_cidr only"
 
   # SSH — to connect from your laptop
   ingress {
@@ -37,7 +37,7 @@ resource "aws_security_group" "dev_vm_sg" {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = [var.admin_cidr]
   }
 
   # HTTP
@@ -64,7 +64,7 @@ resource "aws_security_group" "dev_vm_sg" {
     from_port   = 8000
     to_port     = 8000
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = [var.admin_cidr]
   }
 
   # pgAdmin (PostgreSQL GUI)
@@ -73,7 +73,7 @@ resource "aws_security_group" "dev_vm_sg" {
     from_port   = 5050
     to_port     = 5050
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = [var.admin_cidr]
   }
 
   # RDP — for GUI desktop access (XRDP)
@@ -82,7 +82,7 @@ resource "aws_security_group" "dev_vm_sg" {
     from_port   = 3389
     to_port     = 3389
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = [var.admin_cidr]
   }
 
   # Allow all outbound traffic (to install packages, pull images etc.)
@@ -147,8 +147,9 @@ resource "aws_instance" "dev_vm" {
     systemctl enable xrdp
     systemctl start xrdp
 
-    # ---- Set password for ubuntu user (for RDP login) ----
-    echo "ubuntu:ChangeMe123!" | chpasswd
+    # ---- RDP login password ----
+    # No password is set here: anything in user_data is readable from the instance metadata.
+    # After the first SSH login, run `sudo passwd ubuntu` to choose one for Remote Desktop.
 
     # ---- Install useful tools ----
     apt-get install -y git curl wget unzip vim tree htop net-tools

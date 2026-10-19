@@ -1,8 +1,9 @@
 # Network Asset & Incident Management API
 
-A production-grade REST API for IT teams to track infrastructure assets and manage network incidents across multiple tenants.
+A REST API for IT teams to track infrastructure assets and manage network incidents across multiple tenants.
 
-Built with FastAPI, PostgreSQL, Docker, and deployed to AWS ECS via GitHub Actions CI/CD.
+Built with FastAPI, PostgreSQL and Docker. The repository also holds Terraform for an AWS development VM
+(`infrastructure/`) and draft GitHub Actions workflows (`app/.github/`), which are not active yet.
 
 ---
 
@@ -15,8 +16,8 @@ Built with FastAPI, PostgreSQL, Docker, and deployed to AWS ECS via GitHub Actio
 | Migrations | Alembic |
 | Authentication | JWT (python-jose) + bcrypt |
 | Containerisation | Docker + Docker Compose |
-| Cloud | AWS ECS Fargate |
-| CI/CD | GitHub Actions |
+| Cloud | AWS EC2 development VM (Terraform) |
+| CI/CD | GitHub Actions (drafts, not active yet) |
 | Testing | Pytest + httpx |
 
 ---
@@ -43,14 +44,14 @@ Built with FastAPI, PostgreSQL, Docker, and deployed to AWS ECS via GitHub Actio
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/your-username/network-asset-api.git
-cd network-asset-api
+git clone https://github.com/Gael-Majestic/network_asset_management.git
+cd network_asset_management/app
 ```
 
 ### 2. Set up environment variables
 
 ```bash
-cp .env.example .env
+cp env.example .env
 ```
 
 Open `.env` and fill in:
@@ -138,20 +139,21 @@ Tests use an in-memory SQLite database — no running PostgreSQL needed.
 ## Project Structure
 
 ```
-network-asset-api/
+network_asset_management/
 ├── app/
-│   ├── core/           # Config, JWT, password hashing
-│   ├── db/             # SQLAlchemy engine and session
-│   ├── models/         # Database table definitions
-│   ├── schemas/        # API request/response shapes
-│   ├── routers/        # Endpoint handlers
-│   ├── dependencies.py # Shared auth dependencies
-│   └── main.py         # App entry point
-├── alembic/            # Database migrations
-├── tests/              # Pytest test suite
-├── .github/workflows/  # CI/CD pipelines
-├── Dockerfile
-└── docker-compose.yml
+│   ├── core/              # Config, JWT, password hashing
+│   ├── db/                # SQLAlchemy engine and session
+│   ├── models/            # Database table definitions
+│   ├── schemas/           # API request/response shapes
+│   ├── routers/           # Endpoint handlers
+│   ├── alembic/           # Database migrations
+│   ├── tests/             # Pytest test suite
+│   ├── .github/           # Draft CI/CD workflows (not active yet)
+│   ├── dependencies.py    # Shared auth dependencies
+│   ├── main.py            # App entry point
+│   ├── Dockerfile
+│   └── docker-compose.yaml
+└── infrastructure/        # Terraform for an AWS development VM
 ```
 
 ---
