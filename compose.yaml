@@ -28,7 +28,7 @@ services:
   # SERVICE 1: PostgreSQL Database
   # ============================================================
   db:
-    image: postgres:16.15-alpine
+    image: postgres:18.4-alpine
     # CONCEPT — alpine images:
     # The "-alpine" variant is based on Alpine Linux — a minimal
     # Linux distribution. The image is several times smaller than
