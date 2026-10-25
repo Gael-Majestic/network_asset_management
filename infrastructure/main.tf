@@ -29,7 +29,7 @@ resource "aws_key_pair" "dev_vm_key" {
 # -------------------------------------------------------
 resource "aws_security_group" "dev_vm_sg" {
   name        = "dev-vm-sg"
-  description = "HTTP and HTTPS from anywhere; SSH, RDP, API and pgAdmin from admin_cidr only"
+  description = "HTTP and HTTPS from anywhere; SSH, RDP and the API from admin_cidr only"
 
   # SSH — to connect from your laptop
   ingress {
@@ -67,14 +67,8 @@ resource "aws_security_group" "dev_vm_sg" {
     cidr_blocks = [var.admin_cidr]
   }
 
-  # pgAdmin (PostgreSQL GUI)
-  ingress {
-    description = "pgAdmin"
-    from_port   = 5050
-    to_port     = 5050
-    protocol    = "tcp"
-    cidr_blocks = [var.admin_cidr]
-  }
+  # pgAdmin has no rule: Compose publishes it on the VM's localhost only.
+  # Reach it through SSH instead (see SETUP_GUIDE.sh, step 7).
 
   # RDP — for GUI desktop access (XRDP)
   ingress {

@@ -12,13 +12,23 @@
 #   - "--reload" = restart automatically when code changes
 # ==============================================================
 
+import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.db.database import engine, get_db
 from app.routers import assets, auth, incidents
+
+# CONCEPT — logging instead of print():
+# Log lines carry a level (INFO, WARNING, ERROR) and a logger name,
+# and they end up in the same place as uvicorn's own logs.
+# "uvicorn.error" is the logger uvicorn uses for its startup messages.
+logger = logging.getLogger("uvicorn.error")
 
 
 # ==============================================================
@@ -36,15 +46,15 @@ from app.routers import assets, auth, incidents
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # --- Startup ---
-    print(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
-    print(f"Debug mode: {settings.DEBUG}")
-    print("Database connection pool initialized.")
-    print("API docs available at: http://localhost:8000/docs")
+    logger.info("Starting %s v%s (debug=%s)", settings.APP_NAME, settings.APP_VERSION, settings.DEBUG)
 
     yield  # Application runs here
 
     # --- Shutdown ---
-    print("Shutting down. Closing database connections.")
+    # dispose() closes every pooled connection, so PostgreSQL is not
+    # left holding connections from a process that no longer exists.
+    await engine.dispose()
+    logger.info("Database connections closed")
 
 
 # ==============================================================
@@ -64,20 +74,20 @@ app = FastAPI(
     description="""
 ## Network Asset & Incident Management API
 
-A production-grade REST API for IT teams to track infrastructure assets
-and manage network incidents across multiple tenants.
+A REST API for IT teams to track infrastructure assets and the
+network incidents that affect them.
 
 ### Features
-- **JWT Authentication** with role-based access control
+- **JWT Authentication** with two roles: user and admin
 - **Asset Management** — track routers, servers, cloud instances, and more
 - **Incident Management** — open, assign, and resolve network incidents
-- **Multi-tenant** — each company's data is isolated
+- **Tenants** — every asset records the company or site it belongs to,
+  and the asset list can be filtered by it
 
 ### How to use
 1. Register a user via `POST /auth/register`
-2. Login via `POST /auth/login` to receive a JWT token
-3. Click **Authorize** above and enter: `Bearer your_token_here`
-4. All protected endpoints are now accessible
+2. Click **Authorize** above and log in with your email (as the username) and password
+3. All protected endpoints are now accessible; `GET /auth/me` shows who you are
     """,
     lifespan=lifespan,
 )
@@ -89,17 +99,22 @@ and manage network incidents across multiple tenants.
 # before and after your endpoint handlers.
 # Think of it as a pipeline: Request → Middleware → Endpoint → Middleware → Response
 #
-# CORSMiddleware handles browser cross-origin security.
-# allow_origins=["*"] allows ALL origins — fine for development.
-# In production, replace with your actual frontend domain:
-# allow_origins=["https://yourapp.com"]
+# CORSMiddleware handles browser cross-origin security: it tells
+# a browser which other websites may call this API from JavaScript.
+# The allowed origins come from settings.CORS_ORIGINS, so each
+# environment lists exactly its own front end, for example
+# CORS_ORIGINS='["https://yourapp.com"]'. The default is none.
+#
+# Why not allow_origins=["*"]? Combined with allow_credentials=True
+# it would let ANY website make authenticated calls on behalf of a
+# logged-in user. The tokens here travel in the Authorization header,
+# not in cookies, so credentials are not needed for CORS at all.
 # ==============================================================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],       # Allow all origins (development)
-    allow_credentials=True,
-    allow_methods=["*"],       # Allow all HTTP methods
-    allow_headers=["*"],       # Allow all headers
+    allow_origins=settings.CORS_ORIGINS,
+    allow_methods=["*"],  # Allow all HTTP methods
+    allow_headers=["*"],  # Allow all headers (including Authorization)
 )
 
 
@@ -124,10 +139,15 @@ app.include_router(incidents.router)
 #
 # Why it matters:
 # - Docker uses it to know if the container is healthy
-# - AWS ECS/load balancers ping it to check if the app is running
+#   (see HEALTHCHECK in the Dockerfile)
+# - Load balancers and orchestrators ping it to check if the app is running
 # - Monitoring tools use it to alert if the service is down
 #
-# Every production API must have a /health endpoint.
+# CONCEPT — Liveness versus readiness:
+# /health answers "is the process alive?" and never touches the
+# database, so a database outage does not get the app restarted.
+# /health/ready answers "can it serve requests?" by running
+# SELECT 1. Kubernetes, for example, has a probe for each question.
 # ==============================================================
 @app.get("/health", tags=["Health"])
 async def health_check():
@@ -136,6 +156,18 @@ async def health_check():
         "app": settings.APP_NAME,
         "version": settings.APP_VERSION,
     }
+
+
+@app.get("/health/ready", tags=["Health"])
+async def readiness_check(db: AsyncSession = Depends(get_db)):
+    try:
+        await db.execute(text("SELECT 1"))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database unavailable",
+        ) from exc
+    return {"status": "ready", "database": "ok"}
 
 
 # ==============================================================

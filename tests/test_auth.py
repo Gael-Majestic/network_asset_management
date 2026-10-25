@@ -18,8 +18,11 @@
 #   A good test name reads like a sentence describing behaviour.
 # ==============================================================
 
+from datetime import timedelta
+
 import pytest
 
+from app.core.security import create_access_token, hash_password, verify_password
 
 # ==============================================================
 # CONCEPT — @pytest.mark.asyncio:
@@ -105,7 +108,6 @@ class TestRegister:
 
 
 class TestLogin:
-
     @pytest.mark.asyncio
     async def test_login_success_returns_token(self, client, registered_user):
         """A valid login returns a JWT token."""
@@ -150,3 +152,38 @@ class TestLogin:
             },
         )
         assert response.status_code == 401
+
+
+class TestCurrentUser:
+    async def test_me_returns_the_logged_in_user(self, client, registered_user, auth_headers):
+        response = await client.get("/auth/me", headers=auth_headers)
+        assert response.status_code == 200
+        assert response.json()["email"] == registered_user["email"]
+        assert "hashed_password" not in response.json()
+
+    async def test_me_without_token_returns_401(self, client):
+        assert (await client.get("/auth/me")).status_code == 401
+
+    async def test_expired_token_returns_401(self, client, registered_user):
+        token = create_access_token({"sub": registered_user["email"]}, expires_delta=timedelta(seconds=-1))
+        response = await client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
+        assert response.status_code == 401
+
+    async def test_tampered_token_returns_401(self, client, auth_token):
+        """Changing the signature part of the token makes it invalid."""
+        header, payload, signature = auth_token.split(".")
+        forged = ".".join([header, payload, signature[::-1]])
+        response = await client.get("/auth/me", headers={"Authorization": f"Bearer {forged}"})
+        assert response.status_code == 401
+
+
+class TestPasswordHashing:
+    def test_hash_is_argon2_and_salted(self):
+        first, second = hash_password("same-password"), hash_password("same-password")
+        assert first.startswith("$argon2id$")
+        assert first != second  # a different random salt each time
+
+    def test_verify_accepts_the_right_password_only(self):
+        hashed = hash_password("correct horse")
+        assert verify_password("correct horse", hashed)
+        assert not verify_password("wrong horse", hashed)

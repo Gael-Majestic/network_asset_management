@@ -16,8 +16,8 @@
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 
 from app.core.security import decode_access_token
 from app.db.database import get_db
@@ -93,9 +93,7 @@ async def get_current_user(
     # .where() adds a WHERE clause.
     # await db.execute() runs it asynchronously.
     # .scalar_one_or_none() returns one result or None.
-    result = await db.execute(
-        select(User).where(User.email == email)
-    )
+    result = await db.execute(select(User).where(User.email == email))
     user = result.scalar_one_or_none()
 
     # Step 3: Make sure the user exists
@@ -104,10 +102,7 @@ async def get_current_user(
 
     # Step 4: Make sure the account is active
     if not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="This account has been deactivated"
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This account has been deactivated")
 
     return user
 
@@ -128,8 +123,5 @@ async def get_current_admin_user(
     Non-admin users get a 403 Forbidden response automatically.
     """
     if not current_user.is_admin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin privileges required for this action"
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin privileges required for this action")
     return current_user

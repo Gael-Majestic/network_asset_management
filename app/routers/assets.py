@@ -14,8 +14,8 @@
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 
 from app.db.database import get_db
 from app.dependencies import get_current_admin_user, get_current_user
@@ -42,7 +42,7 @@ async def list_assets(
     skip: int = Query(default=0, ge=0, description="Number of records to skip (for pagination)"),
     limit: int = Query(default=50, ge=1, le=200, description="Maximum records to return"),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),   # Requires login
+    current_user: User = Depends(get_current_user),  # Requires login
 ):
     """
     CONCEPT — Dynamic query building:
@@ -58,16 +58,18 @@ async def list_assets(
     """
     query = select(Asset)
 
-    if tenant:
+    if tenant is not None:
         query = query.where(Asset.tenant == tenant)
-    if asset_type:
+    if asset_type is not None:
         query = query.where(Asset.asset_type == asset_type)
-    if status:
+    if status is not None:
         query = query.where(Asset.status == status)
 
-    # CONCEPT — offset() and limit():
-    # These map directly to SQL: OFFSET 0 LIMIT 50
-    query = query.offset(skip).limit(limit)
+    # CONCEPT — order_by(), offset() and limit():
+    # These map directly to SQL: ORDER BY id OFFSET 0 LIMIT 50
+    # The ORDER BY matters: without it PostgreSQL may return rows
+    # in any order, so page 2 could repeat a row from page 1.
+    query = query.order_by(Asset.id).offset(skip).limit(limit)
 
     result = await db.execute(query)
     assets = result.scalars().all()
@@ -85,7 +87,7 @@ async def list_assets(
     summary="Get a single asset by ID",
 )
 async def get_asset(
-    asset_id: int,   # FastAPI extracts this from the URL path automatically
+    asset_id: int,  # FastAPI extracts this from the URL path automatically
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -96,16 +98,11 @@ async def get_asset(
     If someone calls /assets/abc (not an int), FastAPI returns
     a 422 error automatically.
     """
-    result = await db.execute(
-        select(Asset).where(Asset.id == asset_id)
-    )
+    result = await db.execute(select(Asset).where(Asset.id == asset_id))
     asset = result.scalar_one_or_none()
 
     if asset is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Asset with id {asset_id} not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Asset with id {asset_id} not found")
 
     return asset
 
@@ -130,8 +127,8 @@ async def create_asset(
     The server decides who the owner is, not the client.
     """
     new_asset = Asset(
-        **asset_data.model_dump(),    # Unpack all schema fields into keyword arguments
-        owner_id=current_user.id,     # Set owner from the JWT, not from request body
+        **asset_data.model_dump(),  # Unpack all schema fields into keyword arguments
+        owner_id=current_user.id,  # Set owner from the JWT, not from request body
     )
 
     # CONCEPT — model_dump():
@@ -171,22 +168,16 @@ async def update_asset(
     """
 
     # Step 1: Fetch the existing record
-    result = await db.execute(
-        select(Asset).where(Asset.id == asset_id)
-    )
+    result = await db.execute(select(Asset).where(Asset.id == asset_id))
     asset = result.scalar_one_or_none()
 
     if asset is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Asset with id {asset_id} not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Asset with id {asset_id} not found")
 
     # Step 2: Only asset owner or admin can update
     if asset.owner_id != current_user.id and not current_user.is_admin:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have permission to update this asset"
+            status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to update this asset"
         )
 
     # Step 3: Apply only the sent fields
@@ -221,15 +212,10 @@ async def delete_asset(
     Notice we use get_current_admin_user here instead of
     get_current_user — only admins can delete assets.
     """
-    result = await db.execute(
-        select(Asset).where(Asset.id == asset_id)
-    )
+    result = await db.execute(select(Asset).where(Asset.id == asset_id))
     asset = result.scalar_one_or_none()
 
     if asset is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Asset with id {asset_id} not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Asset with id {asset_id} not found")
 
     await db.delete(asset)

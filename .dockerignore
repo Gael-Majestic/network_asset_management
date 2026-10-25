@@ -1,0 +1,18 @@
+# Keep the build context small and free of secrets. The Dockerfile copies
+# only alembic.ini, alembic/, app/ and requirements.txt; everything below is
+# never sent to the builder at all.
+.git
+.github
+.env
+.venv
+venv
+**/__pycache__
+**/*.py[cod]
+.pytest_cache
+.ruff_cache
+.coverage
+coverage.xml
+htmlcov
+tests
+infrastructure
+*.md

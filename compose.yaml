@@ -1,0 +1,186 @@
+# ==============================================================
+# compose.yaml
+#
+# WHAT THIS FILE DOES:
+#   Defines the services (containers) that work together:
+#     1. db       — PostgreSQL database
+#     2. migrate  — runs the Alembic migrations once, then exits
+#     3. app      — your FastAPI application
+#     4. pgadmin  — browser-based database GUI (optional)
+#
+# CONCEPT — Services:
+# Each "service" in Docker Compose is one container.
+# Compose handles networking automatically — containers
+# can reach each other by their service name.
+# That is why POSTGRES_HOST=db works: "db" is the service name.
+#
+# HOW TO USE (from the repository root, after cp .env.example .env):
+#   Start everything:       docker compose up -d --build
+#   Also start pgAdmin:     docker compose --profile tools up -d
+#   Rebuild on code change: docker compose watch
+#   View logs:              docker compose logs -f app
+#   Stop all:               docker compose down
+# ==============================================================
+
+services:
+
+  # ============================================================
+  # SERVICE 1: PostgreSQL Database
+  # ============================================================
+  db:
+    image: postgres:16.15-alpine
+    # CONCEPT — alpine images:
+    # The "-alpine" variant is based on Alpine Linux — a minimal
+    # Linux distribution. The image is several times smaller than
+    # the standard postgres image. Less storage, faster pulls.
+    # CONCEPT — Pinned tags:
+    # "16.15-alpine" instead of "latest": everyone who runs this
+    # file gets the same PostgreSQL. Dependabot proposes updates.
+
+    environment:
+      # These environment variables configure PostgreSQL on first boot
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
+      # CONCEPT — ${VARIABLE:?message} syntax:
+      # Docker Compose reads these values from your .env file
+      # automatically. This keeps secrets out of this file.
+      # The ":?" part stops Compose with the message if the
+      # variable is missing, instead of starting with an empty value.
+
+    volumes:
+      # CONCEPT — Named volumes:
+      # Without this, ALL your data disappears when the container is removed.
+      # This volume persists the PostgreSQL data files on your host machine.
+      # "postgres_data:/var/lib/postgresql/data" means:
+      #   host volume "postgres_data" → container path "/var/lib/postgresql/data"
+      - postgres_data:/var/lib/postgresql/data
+
+    ports:
+      # Map port 5432 on your host → port 5432 in the container,
+      # so you can connect from your laptop with psql or DBeaver.
+      # "127.0.0.1:" publishes it on localhost only: other machines
+      # on your network cannot reach the database.
+      - "127.0.0.1:5432:5432"
+
+    healthcheck:
+      # CONCEPT — Health checks:
+      # Docker runs this command inside the container periodically.
+      # pg_isready checks if PostgreSQL is accepting connections.
+      # The migrate service uses this to wait before starting.
+      # $$ is an escaped $: the variables are expanded inside the container.
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s     # Check every 5 seconds
+      timeout: 5s      # Give up if no response in 5 seconds
+      retries: 5       # Mark as unhealthy after 5 failed checks
+
+    restart: unless-stopped
+    # CONCEPT — restart policies:
+    # "unless-stopped" means: restart automatically if the container
+    # crashes, but NOT if you manually stop it with `docker stop`.
+
+
+  # ============================================================
+  # SERVICE 2: Database migrations (runs once)
+  # ============================================================
+  migrate:
+    build: .
+    image: network-asset-api:local
+    command: ["alembic", "upgrade", "head"]
+    # CONCEPT — A one-shot service:
+    # This container uses the same image as the app, applies any
+    # pending migrations, and exits. The app waits for it to finish
+    # successfully. Keeping migrations out of the app's start
+    # command means two app replicas never race to migrate the
+    # same database, and a failed migration stops the start-up.
+    environment: &app-environment
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_HOST: db        # Use the service name, not localhost
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB}
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env}
+      APP_NAME: ${APP_NAME:-Network Asset API}
+      DEBUG: ${DEBUG:-false}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      CORS_ORIGINS: ${CORS_ORIGINS:-[]}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+
+  # ============================================================
+  # SERVICE 3: FastAPI Application
+  # ============================================================
+  app:
+    build: .
+    image: network-asset-api:local
+
+    # CONCEPT — YAML anchors:
+    # "&app-environment" above names a block; "*app-environment"
+    # reuses it here, so the two services cannot drift apart.
+    environment: *app-environment
+
+    ports:
+      - "8000:8000"    # Your API is accessible at http://localhost:8000
+
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    # CONCEPT — depends_on with condition:
+    # "service_completed_successfully" means: do not start the app
+    # until the migrate container has exited with code 0. migrate
+    # itself waited for the db health check ("service_healthy").
+
+    # The health check is defined in the Dockerfile (GET /health).
+
+    develop:
+      # CONCEPT — Compose Watch:
+      # `docker compose watch` rebuilds the image and replaces the
+      # container whenever a file under app/ or requirements.txt
+      # changes. The image stays the same one you would deploy.
+      watch:
+        - action: rebuild
+          path: ./app
+        - action: rebuild
+          path: ./requirements.txt
+
+    restart: unless-stopped
+
+
+  # ============================================================
+  # SERVICE 4: pgAdmin — Database GUI (optional)
+  # ============================================================
+  pgadmin:
+    image: dpage/pgadmin4:9.18
+    # CONCEPT — Profiles:
+    # A service with a profile only starts when you ask for it:
+    #   docker compose --profile tools up -d
+    # A plain `docker compose up` leaves it out.
+    profiles: ["tools"]
+
+    environment:
+      # Your own login, from .env. pgAdmin refuses to start without it.
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@example.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-}
+
+    ports:
+      - "127.0.0.1:5050:80"     # Access pgAdmin at http://localhost:5050 (this machine only)
+
+    depends_on:
+      - db
+
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+
+    restart: unless-stopped
+
+
+# ============================================================
+# NAMED VOLUMES
+# These are managed by Docker. Data persists between restarts.
+# ============================================================
+volumes:
+  postgres_data:
+  pgadmin_data:

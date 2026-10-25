@@ -14,11 +14,23 @@
 #
 # For this to work, Alembic needs to import your Base AND
 # all your model files so it knows what tables should exist.
+#
+# CONCEPT — Async migrations:
+# The app talks to PostgreSQL through asyncpg, an async driver.
+# Alembic itself runs migrations synchronously, so this file
+# follows the "asyncio" recipe from the Alembic documentation:
+# open an async connection, then hand it to Alembic through
+# connection.run_sync(). One driver serves both the app and the
+# migrations, so no second (synchronous) driver is needed.
+# https://alembic.sqlalchemy.org/en/latest/cookbook.html#using-asyncio-with-alembic
 # ==============================================================
 
+import asyncio
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import pool
+from sqlalchemy.engine import Connection
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from alembic import context
 
@@ -46,9 +58,10 @@ if config.config_file_name is not None:
 # to figure out what migrations are needed.
 target_metadata = Base.metadata
 
-# Override the database URL from alembic.ini with our settings
-# This uses the SYNCHRONOUS URL (Alembic does not support async)
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL_SYNC)
+# The URL comes from our settings (the same POSTGRES_* variables the app
+# reads). A sqlalchemy.url set in alembic.ini or by a script takes priority,
+# which is handy for pointing Alembic at a throwaway database.
+DATABASE_URL = config.get_main_option("sqlalchemy.url") or settings.DATABASE_URL
 
 
 def run_migrations_offline() -> None:
@@ -58,9 +71,8 @@ def run_migrations_offline() -> None:
     Useful when you want to review SQL before running it.
     Run with: alembic upgrade head --sql
     """
-    url = config.get_main_option("sqlalchemy.url")
     context.configure(
-        url=url,
+        url=DATABASE_URL,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -70,30 +82,33 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
-def run_migrations_online() -> None:
+def do_run_migrations(connection: Connection) -> None:
+    """Runs the migrations on a connection that Alembic can use synchronously."""
+    context.configure(connection=connection, target_metadata=target_metadata)
+
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+async def run_migrations_online() -> None:
     """
     CONCEPT — Online mode (the normal mode):
     Connects to the database and runs migrations directly.
     Run with: alembic upgrade head
+
+    NullPool: migrations run once and exit, so there is no point
+    keeping a pool of connections open.
     """
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
+    connectable = create_async_engine(DATABASE_URL, poolclass=pool.NullPool)
 
-    with connectable.connect() as connection:
-        context.configure(
-            connection=connection,
-            target_metadata=target_metadata,
-        )
+    async with connectable.connect() as connection:
+        await connection.run_sync(do_run_migrations)
 
-        with context.begin_transaction():
-            context.run_migrations()
+    await connectable.dispose()
 
 
 # Run the appropriate mode
 if context.is_offline_mode():
     run_migrations_offline()
 else:
-    run_migrations_online()
+    asyncio.run(run_migrations_online())

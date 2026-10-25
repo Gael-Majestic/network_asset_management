@@ -14,6 +14,7 @@
 # ==============================================================
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy import URL
 
 
 class Settings(BaseSettings):
@@ -36,26 +37,33 @@ class Settings(BaseSettings):
     # If any is missing, the app refuses to start.
     POSTGRES_USER: str
     POSTGRES_PASSWORD: str
-    POSTGRES_HOST: str = "db"       # "db" inside Docker, "localhost" outside
+    POSTGRES_HOST: str = "db"  # "db" inside Docker, "localhost" outside
     POSTGRES_PORT: int = 5432
     POSTGRES_DB: str
 
     # ---- Security ----
-    SECRET_KEY: str                          # Required — no default
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30    # Optional — defaults to 30
+    SECRET_KEY: str  # Required — no default
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30  # Optional — defaults to 30
+
+    # ---- CORS ----
+    # Web origins (e.g. a front end at http://localhost:3000) that may call
+    # the API from a browser. Empty means none: tools such as curl, Swagger
+    # UI on the same host, and other servers are not affected by CORS.
+    # Set it in .env as a JSON list: CORS_ORIGINS='["http://localhost:3000"]'
+    CORS_ORIGINS: list[str] = []
 
     # ---- Pydantic configuration ----
     # This inner class tells Pydantic HOW to behave.
     # model_config is the modern Pydantic v2 way to set this.
     model_config = SettingsConfigDict(
-        env_file=".env",           # Read from this file
-        env_file_encoding="utf-8", # File encoding
-        case_sensitive=False,      # POSTGRES_USER and postgres_user are the same
-        extra="ignore",            # Ignore any extra variables in .env we do not use
+        env_file=".env",  # Read from this file
+        env_file_encoding="utf-8",  # File encoding
+        case_sensitive=False,  # POSTGRES_USER and postgres_user are the same
+        extra="ignore",  # Ignore any extra variables in .env we do not use
     )
 
     @property
-    def DATABASE_URL(self) -> str:
+    def DATABASE_URL(self) -> URL:
         """
         CONCEPT — @property:
         A @property lets you call a method as if it were a plain
@@ -65,29 +73,24 @@ class Settings(BaseSettings):
         We build the full connection URL here from the individual
         parts so the rest of the app never needs to construct it.
 
-        The format is required by SQLAlchemy + asyncpg:
+        The URL looks like this:
         postgresql+asyncpg://USER:PASSWORD@HOST:PORT/DATABASE
         The "+asyncpg" part tells SQLAlchemy to use the async driver.
-        """
-        return (
-            f"postgresql+asyncpg://"
-            f"{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
-            f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}"
-            f"/{self.POSTGRES_DB}"
-        )
+        The app and Alembic both use it.
 
-    @property
-    def DATABASE_URL_SYNC(self) -> str:
+        CONCEPT — Why URL.create() instead of an f-string:
+        A password such as "p@ss/word" contains characters that have
+        a meaning inside a URL ("@" ends the password, "/" starts the
+        database name). URL.create() escapes each part correctly,
+        so any password works.
         """
-        Alembic (the migration tool) does not support async connections.
-        It needs a synchronous URL. The only difference is the driver:
-        "postgresql" instead of "postgresql+asyncpg".
-        """
-        return (
-            f"postgresql://"
-            f"{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
-            f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}"
-            f"/{self.POSTGRES_DB}"
+        return URL.create(
+            drivername="postgresql+asyncpg",
+            username=self.POSTGRES_USER,
+            password=self.POSTGRES_PASSWORD,
+            host=self.POSTGRES_HOST,
+            port=self.POSTGRES_PORT,
+            database=self.POSTGRES_DB,
         )
 
 

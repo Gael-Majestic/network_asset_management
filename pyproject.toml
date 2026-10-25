@@ -1,0 +1,30 @@
+# Tool settings. The project is an application, not a library, so its
+# dependencies live in requirements.txt and requirements-dev.txt.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Auto mode: every async test and fixture runs in the event loop without a
+# marker. One loop for the whole session, because the test database engine
+# is created once and shared by every test.
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+addopts = "-ra"
+filterwarnings = ["error::DeprecationWarning:app.*"]
+
+[tool.coverage.run]
+source = ["app"]
+# SQLAlchemy runs async database calls through greenlets; without this,
+# coverage loses track of the lines that run after each await.
+concurrency = ["greenlet", "thread"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["alembic/versions"]
+
+[tool.ruff.lint]
+# E/W: pycodestyle, F: pyflakes, I: import order, B: likely bugs
+select = ["E", "W", "F", "I", "B"]
+# B008: FastAPI's Depends() and Query() in default arguments are the documented style.
+ignore = ["B008"]

@@ -6,24 +6,37 @@
 #   2. Verifies a plain password against a stored hash
 #   3. Creates JWT access tokens when a user logs in
 #   4. Decodes JWT tokens to identify who is making a request
+#
+# The libraries are the ones the FastAPI security tutorial uses:
+# pwdlib (Argon2) for passwords and PyJWT for tokens.
+# https://fastapi.tiangolo.com/tutorial/security/oauth2-jwt/
 # ==============================================================
 
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from jose import JWTError, jwt
-from passlib.context import CryptContext
+import jwt
+from jwt.exceptions import InvalidTokenError
+from pwdlib import PasswordHash
 
 from app.core.config import settings
 
 # ==============================================================
-# CONCEPT — CryptContext:
-# This object is our password hashing "context". We tell it
-# to use "bcrypt" as the algorithm and set deprecated="auto"
-# which means if a stronger algorithm comes along later,
-# old passwords are automatically upgraded on next login.
+# CONCEPT — PasswordHash.recommended():
+# This object does the password hashing. "recommended" picks
+# Argon2, the winner of the Password Hashing Competition and the
+# first choice in the OWASP Password Storage Cheat Sheet. Argon2
+# is deliberately slow and memory-hungry, which makes guessing
+# passwords from a stolen database very expensive.
 # ==============================================================
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+password_hash = PasswordHash.recommended()
+
+# A hash of a throwaway password. When someone logs in with an
+# email that does not exist, we still verify the password against
+# this hash, so the response takes as long as for a real account.
+# Without it, an attacker could tell which emails are registered
+# just by timing the login endpoint.
+DUMMY_HASH = password_hash.hash("dummy-password-for-timing")
 
 # The algorithm used to sign JWT tokens.
 # HS256 = HMAC with SHA-256. A widely trusted standard.
@@ -32,10 +45,10 @@ ALGORITHM = "HS256"
 
 def hash_password(plain_password: str) -> str:
     """
-    Takes a plain text password and returns its bcrypt hash.
+    Takes a plain text password and returns its Argon2 hash.
 
-    CONCEPT — What bcrypt does:
-    bcrypt adds a random "salt" to the password before hashing.
+    CONCEPT — What a password hash with a salt does:
+    The hasher adds a random "salt" to the password before hashing.
     A salt is a random string that is different for every user.
     This means two users with the same password will have
     completely different hashes. This defeats "rainbow table"
@@ -43,9 +56,11 @@ def hash_password(plain_password: str) -> str:
 
     Example:
         hash_password("hello123")
-        → "$2b$12$EixZaYVK1fsbw1Zfbx3OXePaWxn96p36..."
+        → "$argon2id$v=19$m=65536,t=3,p=4$..."
+    The hash records the algorithm, its cost settings and the salt,
+    so it can be verified later without storing anything else.
     """
-    return pwd_context.hash(plain_password)
+    return password_hash.hash(plain_password)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -54,15 +69,15 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     Returns True if they match, False if they do not.
 
     CONCEPT — How verification works without reversing:
-    bcrypt extracts the salt from the stored hash, re-hashes
-    the plain password WITH that same salt, and compares the
-    result. If they match, the password is correct.
+    The hasher reads the salt and settings from the stored hash,
+    re-hashes the plain password WITH that same salt, and compares
+    the result. If they match, the password is correct.
 
     Example:
-        verify_password("hello123", "$2b$12$Eix...")  → True
-        verify_password("wrongpass", "$2b$12$Eix...") → False
+        verify_password("hello123", "$argon2id$...")  → True
+        verify_password("wrongpass", "$argon2id$...") → False
     """
-    return pwd_context.verify(plain_password, hashed_password)
+    return password_hash.verify(plain_password, hashed_password)
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
@@ -96,9 +111,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire = datetime.now(timezone.utc) + timedelta(
-            minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
-        )
+        expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
 
     # Add expiration time to the payload
     to_encode.update({"exp": expire})
@@ -131,10 +144,8 @@ def decode_access_token(token: str) -> Optional[str]:
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
         # "sub" is the standard JWT claim for "subject" — who this token belongs to
-        email: str = payload.get("sub")
-        if email is None:
-            return None
+        email: Optional[str] = payload.get("sub")
         return email
-    except JWTError:
-        # JWTError covers: expired tokens, invalid signature, malformed tokens
+    except InvalidTokenError:
+        # InvalidTokenError covers: expired tokens, invalid signature, malformed tokens
         return None

@@ -19,7 +19,7 @@ variable "ubuntu_ami" {
 }
 
 variable "admin_cidr" {
-  description = "Your public IP address in CIDR form, e.g. 203.0.113.10/32. Only this address can reach SSH, RDP, the API port and pgAdmin."
+  description = "Your public IP address in CIDR form, e.g. 203.0.113.10/32. Only this address can reach SSH, RDP and the API port."
   type        = string
 }
 

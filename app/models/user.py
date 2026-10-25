@@ -7,11 +7,21 @@
 # ==============================================================
 
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
+
+# CONCEPT — TYPE_CHECKING imports:
+# The relationships below name the other models as strings, so the
+# models can refer to each other without a circular import at run time.
+# These imports run only for type checkers and linters, which then know
+# what "Asset" and "Incident" mean.
+if TYPE_CHECKING:
+    from app.models.asset import Asset
+    from app.models.incident import Incident
 
 
 class User(Base):
@@ -44,7 +54,7 @@ class User(Base):
     # The full name of the user. Optional (nullable=True).
     full_name: Mapped[str] = mapped_column(String(255), nullable=True)
 
-    # The bcrypt hash of their password. Never the plain password.
+    # The Argon2 hash of their password. Never the plain password.
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
 
     # Is this account active? We set to False to "soft delete" users
@@ -58,14 +68,9 @@ class User(Base):
     # Keeping track of when records are created and updated is
     # standard practice. The `default` parameter runs at INSERT time.
     # `onupdate` runs automatically when a row is updated.
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc)
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc)
     )
 
     # CONCEPT — Relationships:

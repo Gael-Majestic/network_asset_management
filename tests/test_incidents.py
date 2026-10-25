@@ -6,7 +6,6 @@ import pytest
 
 
 class TestIncidents:
-
     @pytest.mark.asyncio
     async def test_create_incident_success(self, client, auth_headers):
         """An authenticated user can open an incident."""
@@ -23,8 +22,8 @@ class TestIncidents:
         data = response.json()
         assert data["title"] == "Switch down in Server Room 1"
         assert data["severity"] == "high"
-        assert data["status"] == "open"       # Default status
-        assert data["reporter_id"] is not None # Set from JWT
+        assert data["status"] == "open"  # Default status
+        assert data["reporter_id"] is not None  # Set from JWT
 
     @pytest.mark.asyncio
     async def test_create_incident_unauthenticated_returns_401(self, client):
@@ -119,3 +118,47 @@ class TestIncidents:
         """Requesting a non-existent incident ID returns 404."""
         response = await client.get("/incidents/99999", headers=auth_headers)
         assert response.status_code == 404
+
+
+class TestIncidentRules:
+    async def test_incident_for_missing_asset_returns_404(self, client, auth_headers):
+        """A foreign key to nothing is a client error, not a 500."""
+        response = await client.post(
+            "/incidents/", json={"title": "Link down", "asset_id": 99999}, headers=auth_headers
+        )
+        assert response.status_code == 404
+
+    async def test_reopening_clears_resolved_at(self, client, auth_headers):
+        created = await client.post("/incidents/", json={"title": "Packet loss"}, headers=auth_headers)
+        url = f"/incidents/{created.json()['id']}"
+        resolved = await client.patch(url, json={"status": "resolved"}, headers=auth_headers)
+        assert resolved.json()["resolved_at"] is not None
+        reopened = await client.patch(url, json={"status": "open"}, headers=auth_headers)
+        assert reopened.json()["resolved_at"] is None
+
+    async def test_closing_keeps_the_resolution_time(self, client, auth_headers):
+        created = await client.post("/incidents/", json={"title": "DNS slow"}, headers=auth_headers)
+        url = f"/incidents/{created.json()['id']}"
+        resolved = await client.patch(url, json={"status": "resolved"}, headers=auth_headers)
+        closed = await client.patch(url, json={"status": "closed"}, headers=auth_headers)
+        assert closed.json()["resolved_at"] == resolved.json()["resolved_at"]
+
+    async def test_deleting_an_asset_keeps_its_incidents(self, client, auth_headers, make_user):
+        """The incident history stays; its link to the deleted asset is cleared."""
+        asset = await client.post(
+            "/assets/", json={"name": "AP-3", "asset_type": "access_point", "tenant": "Site C"}, headers=auth_headers
+        )
+        incident = await client.post(
+            "/incidents/", json={"title": "AP offline", "asset_id": asset.json()["id"]}, headers=auth_headers
+        )
+        admin = await make_user("admin@example.com", is_admin=True)
+        assert (await client.delete(f"/assets/{asset.json()['id']}", headers=admin)).status_code == 204
+        response = await client.get(f"/incidents/{incident.json()['id']}", headers=auth_headers)
+        assert response.status_code == 200
+        assert response.json()["asset_id"] is None
+
+    @pytest.mark.parametrize("field", ["title", "severity", "status"])
+    async def test_patch_null_for_required_field_returns_422(self, client, auth_headers, field):
+        created = await client.post("/incidents/", json={"title": "Jitter"}, headers=auth_headers)
+        response = await client.patch(f"/incidents/{created.json()['id']}", json={field: None}, headers=auth_headers)
+        assert response.status_code == 422

@@ -1,0 +1,25 @@
+# ==============================================================
+# REQUIREMENTS.TXT: what the application needs to run.
+# Every version is pinned so a build today and a build next month
+# install exactly the same code. Dependabot proposes upgrades.
+# Install with: pip install -r requirements.txt
+# Development and test tools are in requirements-dev.txt.
+# ==============================================================
+
+# --- Web framework & server ---
+fastapi==0.162.0            # The API framework
+uvicorn[standard]==0.54.0   # The ASGI server that runs FastAPI
+python-multipart==0.0.32    # Parses the form data sent to POST /auth/login
+email-validator==2.3.0      # Needed by Pydantic's EmailStr type
+
+# --- Database ---
+sqlalchemy[asyncio]==2.1.6  # ORM; the [asyncio] extra installs greenlet, which async sessions need
+asyncpg==0.32.0             # Async PostgreSQL driver (used by the app and by Alembic)
+alembic[tz]==1.20.1         # Database migration tool; [tz] adds tzdata for "timezone = UTC" in alembic.ini
+
+# --- Configuration ---
+pydantic-settings==2.16.1   # Reads environment variables and .env into a typed Settings class
+
+# --- Authentication & Security ---
+pyjwt==2.15.1               # Creates and verifies JWT access tokens
+pwdlib[argon2]==0.3.1       # Password hashing with Argon2, as the FastAPI security tutorial recommends

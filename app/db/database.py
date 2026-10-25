@@ -15,7 +15,6 @@ from sqlalchemy.orm import DeclarativeBase
 
 from app.core.config import settings
 
-
 # ==============================================================
 # CONCEPT — The Engine:
 # The engine is the foundation. It holds the connection pool.
@@ -28,11 +27,11 @@ from app.core.config import settings
 # ==============================================================
 engine = create_async_engine(
     settings.DATABASE_URL,
-    echo=settings.DEBUG,     # Print SQL queries in development
-    pool_size=5,             # Keep 5 connections open and ready
-    max_overflow=10,         # Allow up to 10 extra when needed
-    pool_timeout=30,         # Wait up to 30 seconds for a free connection
-    pool_recycle=1800,       # Recycle connections every 30 minutes
+    echo=settings.DEBUG,  # Print SQL queries in development
+    pool_size=5,  # Keep 5 connections open and ready
+    max_overflow=10,  # Allow up to 10 extra when needed
+    pool_timeout=30,  # Wait up to 30 seconds for a free connection
+    pool_recycle=1800,  # Recycle connections every 30 minutes
 )
 
 

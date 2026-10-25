@@ -15,11 +15,12 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 
 from app.db.database import get_db
 from app.dependencies import get_current_admin_user, get_current_user
+from app.models.asset import Asset
 from app.models.incident import Incident, IncidentSeverity, IncidentStatus
 from app.models.user import User
 from app.schemas.incident import IncidentCreate, IncidentResponse, IncidentUpdate
@@ -43,14 +44,17 @@ async def list_incidents(
 ):
     query = select(Incident)
 
-    if status:
+    if status is not None:
         query = query.where(Incident.status == status)
-    if severity:
+    if severity is not None:
         query = query.where(Incident.severity == severity)
-    if asset_id:
+    if asset_id is not None:
         query = query.where(Incident.asset_id == asset_id)
 
-    query = query.offset(skip).limit(limit)
+    # Newest first. A fixed ORDER BY also makes pagination reliable:
+    # without one, PostgreSQL may return rows in any order, and the
+    # same row could appear on two pages.
+    query = query.order_by(Incident.id.desc()).offset(skip).limit(limit)
     result = await db.execute(query)
     return result.scalars().all()
 
@@ -65,16 +69,11 @@ async def get_incident(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    result = await db.execute(
-        select(Incident).where(Incident.id == incident_id)
-    )
+    result = await db.execute(select(Incident).where(Incident.id == incident_id))
     incident = result.scalar_one_or_none()
 
     if incident is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Incident with id {incident_id} not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Incident with id {incident_id} not found")
     return incident
 
 
@@ -89,6 +88,15 @@ async def create_incident(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # CONCEPT — Validate references before inserting:
+    # asset_id is a foreign key. If it points to an asset that does
+    # not exist, PostgreSQL rejects the INSERT and the client would
+    # see a 500 error. Checking first gives a clear 404 instead.
+    if incident_data.asset_id is not None and await db.get(Asset, incident_data.asset_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Asset with id {incident_data.asset_id} not found"
+        )
+
     new_incident = Incident(
         **incident_data.model_dump(),
         reporter_id=current_user.id,
@@ -110,16 +118,11 @@ async def update_incident(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    result = await db.execute(
-        select(Incident).where(Incident.id == incident_id)
-    )
+    result = await db.execute(select(Incident).where(Incident.id == incident_id))
     incident = result.scalar_one_or_none()
 
     if incident is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Incident with id {incident_id} not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Incident with id {incident_id} not found")
 
     update_data = incident_data.model_dump(exclude_unset=True)
 
@@ -129,8 +132,15 @@ async def update_incident(
     # send a resolved_at value — the server sets it.
     # This is an example of server-side business logic that
     # the API enforces regardless of what the client sends.
-    if update_data.get("status") == IncidentStatus.RESOLVED:
+    # Reopening the incident clears the timestamp again, and
+    # closing it keeps the time it was first resolved.
+    new_status = update_data.get("status")
+    if new_status == IncidentStatus.RESOLVED:
         update_data["resolved_at"] = datetime.now(timezone.utc)
+    elif new_status == IncidentStatus.CLOSED and incident.resolved_at is None:
+        update_data["resolved_at"] = datetime.now(timezone.utc)
+    elif new_status in (IncidentStatus.OPEN, IncidentStatus.IN_PROGRESS):
+        update_data["resolved_at"] = None
 
     for field, value in update_data.items():
         setattr(incident, field, value)
@@ -150,15 +160,10 @@ async def delete_incident(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
 ):
-    result = await db.execute(
-        select(Incident).where(Incident.id == incident_id)
-    )
+    result = await db.execute(select(Incident).where(Incident.id == incident_id))
     incident = result.scalar_one_or_none()
 
     if incident is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Incident with id {incident_id} not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Incident with id {incident_id} not found")
 
     await db.delete(incident)

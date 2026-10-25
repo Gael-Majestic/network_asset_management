@@ -5,9 +5,10 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.models.incident import IncidentSeverity, IncidentStatus
+from app.schemas.validators import reject_nulls
 
 
 class IncidentBase(BaseModel):
@@ -16,7 +17,7 @@ class IncidentBase(BaseModel):
     severity: IncidentSeverity = IncidentSeverity.MEDIUM
     asset_id: Optional[int] = Field(
         default=None,
-        description="ID of the affected asset. Optional — some incidents are not tied to a specific asset."
+        description="ID of the affected asset. Optional — some incidents are not tied to a specific asset.",
     )
 
 
@@ -26,6 +27,7 @@ class IncidentCreate(IncidentBase):
     reporter_id comes from the JWT token in the router,
     not from the request body. The logged-in user IS the reporter.
     """
+
     pass
 
 
@@ -39,17 +41,25 @@ class IncidentUpdate(BaseModel):
     For this project we keep it simple and allow any update.
     You could add a validator here later using @field_validator.
     """
+
     title: Optional[str] = Field(default=None, min_length=1, max_length=255)
     description: Optional[str] = None
     severity: Optional[IncidentSeverity] = None
     status: Optional[IncidentStatus] = None
     resolution_notes: Optional[str] = None
 
+    @model_validator(mode="after")
+    def required_columns_are_not_null(self):
+        # title, severity and status are NOT NULL in the database.
+        reject_nulls(self, ("title", "severity", "status"))
+        return self
+
 
 class IncidentResponse(IncidentBase):
     """
     Schema for API responses.
     """
+
     id: int
     status: IncidentStatus
     reporter_id: int

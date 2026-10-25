@@ -1,0 +1,13 @@
+# ==============================================================
+# REQUIREMENTS-DEV.TXT: everything in requirements.txt, plus the
+# tools used to test and lint the code. Not installed in the image.
+# Install with: pip install -r requirements-dev.txt
+# ==============================================================
+-r requirements.txt
+
+pytest==9.1.1               # Test runner
+pytest-asyncio==1.4.0       # Lets pytest run async test functions and fixtures
+pytest-cov==7.1.0           # Measures which lines the tests execute
+httpx==0.28.1               # HTTP client the tests use to call the API in-process
+aiosqlite==0.22.1           # Async SQLite driver for the in-memory test database
+ruff==0.17.2                # Linter and formatter

@@ -6,15 +6,17 @@
 #   Endpoints:
 #     POST /auth/register  → create a new user account
 #     POST /auth/login     → authenticate and receive a JWT token
+#     GET  /auth/me        → the account the token belongs to
 # ==============================================================
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 
-from app.core.security import create_access_token, hash_password, verify_password
+from app.core.security import DUMMY_HASH, create_access_token, hash_password, verify_password
 from app.db.database import get_db
+from app.dependencies import get_current_user
 from app.models.user import User
 from app.schemas.token import Token
 from app.schemas.user import UserCreate, UserResponse
@@ -61,23 +63,18 @@ async def register(
     # Step 1: Check if this email is already registered
     # select(User).where(...) is the SQLAlchemy way of writing:
     # SELECT * FROM users WHERE email = 'the_email' LIMIT 1
-    result = await db.execute(
-        select(User).where(User.email == user_data.email)
-    )
+    result = await db.execute(select(User).where(User.email == user_data.email))
     existing_user = result.scalar_one_or_none()
 
     if existing_user:
         # CONCEPT — HTTP 400 Bad Request:
         # The client made a valid request but with data that
         # violates a business rule (email already taken).
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="An account with this email already exists"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="An account with this email already exists")
 
     # Step 2: Hash the password before storing
     # NEVER store the plain password. hash_password() from
-    # security.py turns "hello123" into a bcrypt hash.
+    # security.py turns "hello123" into an Argon2 hash.
     hashed = hash_password(user_data.password)
 
     # Step 3: Create the User object
@@ -132,16 +129,18 @@ async def login(
     """
 
     # Step 1: Find the user by email
-    result = await db.execute(
-        select(User).where(User.email == form_data.username)
-    )
+    result = await db.execute(select(User).where(User.email == form_data.username))
     user = result.scalar_one_or_none()
 
     # Step 2: Verify credentials
     # We use the same generic error message for both "user not found"
     # AND "wrong password". This is intentional security practice —
     # different messages would let attackers discover valid emails.
-    if not user or not verify_password(form_data.password, user.hashed_password):
+    # For the same reason, an unknown email is checked against a dummy
+    # hash: the response then takes as long as a wrong password would.
+    if user is None:
+        verify_password(form_data.password, DUMMY_HASH)
+    if user is None or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
@@ -150,10 +149,7 @@ async def login(
 
     # Step 3: Check the account is active
     if not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="This account has been deactivated"
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This account has been deactivated")
 
     # Step 4: Create and return the JWT token
     # We embed the user's email as the "sub" (subject) claim.
@@ -161,3 +157,19 @@ async def login(
     access_token = create_access_token(data={"sub": user.email})
 
     return Token(access_token=access_token, token_type="bearer")
+
+
+@router.get(
+    "/me",
+    response_model=UserResponse,
+    summary="Get the account of the logged-in user",
+)
+async def read_current_user(current_user: User = Depends(get_current_user)):
+    """
+    CONCEPT — The dependency does all the work:
+    get_current_user() decodes the token and loads the user, or
+    answers 401 itself. By the time this function runs, we already
+    have the User object, so the endpoint is a single line.
+    A client calls this after logging in to show who is signed in.
+    """
+    return current_user

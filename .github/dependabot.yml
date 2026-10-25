@@ -1,0 +1,27 @@
+# Dependabot opens a pull request when a pinned version has an update.
+# https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      python:
+        patterns: ["*"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: monthly
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: monthly
+  - package-ecosystem: terraform
+    directory: /infrastructure
+    schedule:
+      interval: monthly

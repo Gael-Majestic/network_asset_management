@@ -8,11 +8,21 @@
 
 import enum
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
+
+# CONCEPT — TYPE_CHECKING imports:
+# The relationships below name the other models as strings, so the
+# models can refer to each other without a circular import at run time.
+# These imports run only for type checkers and linters, which then know
+# what "Incident" and "User" mean.
+if TYPE_CHECKING:
+    from app.models.incident import Incident
+    from app.models.user import User
 
 
 # ==============================================================
@@ -53,13 +63,9 @@ class Asset(Base):
     # CONCEPT — Enum column:
     # SQLAlchemy's Enum() takes our Python enum class and creates
     # a PostgreSQL ENUM type in the database.
-    asset_type: Mapped[AssetType] = mapped_column(
-        Enum(AssetType), nullable=False
-    )
+    asset_type: Mapped[AssetType] = mapped_column(Enum(AssetType), nullable=False)
 
-    status: Mapped[AssetStatus] = mapped_column(
-        Enum(AssetStatus), default=AssetStatus.ACTIVE, nullable=False
-    )
+    status: Mapped[AssetStatus] = mapped_column(Enum(AssetStatus), default=AssetStatus.ACTIVE, nullable=False)
 
     # Physical or logical location e.g. "Server Room B", "AWS af-south-1"
     location: Mapped[str] = mapped_column(String(255), nullable=True)
@@ -79,18 +85,11 @@ class Asset(Base):
     # by a user that exists in the users table.
     # PostgreSQL enforces this — you cannot create an asset
     # with an owner_id that does not exist in users.
-    owner_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("users.id"), nullable=False
-    )
+    owner_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc)
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc)
     )
 
     # Relationship back to the User who owns this asset

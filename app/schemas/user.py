@@ -32,6 +32,7 @@ class UserBase(BaseModel):
     You get this type by installing: pip install pydantic[email]
     (already included via fastapi install)
     """
+
     email: EmailStr
     full_name: Optional[str] = None
 
@@ -46,10 +47,11 @@ class UserCreate(UserBase):
     min_length=8 means Pydantic rejects passwords shorter than 8 chars.
     The description appears in the Swagger UI documentation.
     """
+
     password: str = Field(
-        ...,              # ... means this field is REQUIRED (no default)
+        ...,  # ... means this field is REQUIRED (no default)
         min_length=8,
-        description="Password must be at least 8 characters"
+        description="Password must be at least 8 characters",
     )
 
 
@@ -65,6 +67,7 @@ class UserUpdate(BaseModel):
     Setting the default to None means if not sent, it is None.
     In the router, we check: if field is not None, update it.
     """
+
     full_name: Optional[str] = None
     password: Optional[str] = Field(default=None, min_length=8)
 
@@ -88,6 +91,7 @@ class UserResponse(UserBase):
     This used to be called `orm_mode = True` in Pydantic v1.
     In Pydantic v2 it is `from_attributes = True`.
     """
+
     id: int
     is_active: bool
     is_admin: bool

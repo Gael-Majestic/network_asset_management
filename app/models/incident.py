@@ -8,11 +8,21 @@
 
 import enum
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
+
+# CONCEPT — TYPE_CHECKING imports:
+# The relationships below name the other models as strings, so the
+# models can refer to each other without a circular import at run time.
+# These imports run only for type checkers and linters, which then know
+# what "Asset" and "User" mean.
+if TYPE_CHECKING:
+    from app.models.asset import Asset
+    from app.models.user import User
 
 
 class IncidentSeverity(str, enum.Enum):
@@ -41,37 +51,24 @@ class Incident(Base):
         Enum(IncidentSeverity), default=IncidentSeverity.MEDIUM, nullable=False
     )
 
-    status: Mapped[IncidentStatus] = mapped_column(
-        Enum(IncidentStatus), default=IncidentStatus.OPEN, nullable=False
-    )
+    status: Mapped[IncidentStatus] = mapped_column(Enum(IncidentStatus), default=IncidentStatus.OPEN, nullable=False)
 
     # Which asset this incident is about
     # nullable=True because some incidents may not be tied to a specific asset
-    asset_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("assets.id"), nullable=True
-    )
+    asset_id: Mapped[int] = mapped_column(Integer, ForeignKey("assets.id", ondelete="SET NULL"), nullable=True)
 
     # Who opened this incident
-    reporter_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("users.id"), nullable=False
-    )
+    reporter_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
 
     # Free text field to record resolution steps
     resolution_notes: Mapped[str] = mapped_column(Text, nullable=True)
 
     # When was this incident resolved?
-    resolved_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    resolved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc)
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc)
     )
 
     # Relationships

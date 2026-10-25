@@ -25,13 +25,30 @@
 #         assert my_number == 42
 # ==============================================================
 
-import pytest
-import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+import os
 
-from app.db.database import Base, get_db
-from app.main import app
+# CONCEPT — Settings for the test run:
+# app.core.config reads its settings the moment it is imported, and
+# POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB and SECRET_KEY are
+# required. These defaults let `pytest` run with no .env file.
+# setdefault() keeps any value that is already set in the environment.
+# They must be set BEFORE the app is imported, hence their position.
+for name, value in {
+    "POSTGRES_USER": "test",
+    "POSTGRES_PASSWORD": "test",
+    "POSTGRES_DB": "test",
+    "SECRET_KEY": "test-secret-key-that-is-at-least-32-bytes-long",
+}.items():
+    os.environ.setdefault(name, value)
+
+import pytest_asyncio  # noqa: E402
+from httpx import ASGITransport, AsyncClient  # noqa: E402
+from sqlalchemy import event  # noqa: E402
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine  # noqa: E402
+
+from app.db.database import Base, get_db  # noqa: E402
+from app.main import app  # noqa: E402
+from app.models.user import User  # noqa: E402
 
 # ==============================================================
 # CONCEPT — Test database:
@@ -68,6 +85,17 @@ async def test_engine():
         connect_args={"check_same_thread": False},
         echo=False,
     )
+
+    # CONCEPT — Foreign keys in SQLite:
+    # PostgreSQL always enforces foreign keys; SQLite only does when
+    # each connection runs PRAGMA foreign_keys=ON. Turning it on here
+    # makes the tests catch the same mistakes PostgreSQL would, such
+    # as an incident pointing to an asset that does not exist.
+    @event.listens_for(engine.sync_engine, "connect")
+    def enable_foreign_keys(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
 
     # Create all tables defined in our models
     async with engine.begin() as conn:
@@ -188,3 +216,33 @@ async def auth_headers(auth_token):
     We build this header once here and inject it into requests.
     """
     return {"Authorization": f"Bearer {auth_token}"}
+
+
+@pytest_asyncio.fixture
+async def make_user(client, db_session):
+    """
+    Creates extra users on demand and returns their auth headers.
+
+    CONCEPT — Factory fixture:
+    Instead of returning one ready-made object, this fixture returns
+    a FUNCTION. A test can call it as many times as it needs, with
+    different arguments: one owner, one stranger, one admin...
+
+    The API has no endpoint that grants admin rights (on purpose:
+    see the README for how an operator does it in the database), so
+    for an admin the fixture flips is_admin directly in the session.
+    """
+
+    async def _make_user(email: str, is_admin: bool = False) -> dict[str, str]:
+        password = "factorypassword123"
+        response = await client.post("/auth/register", json={"email": email, "password": password})
+        assert response.status_code == 201
+        if is_admin:
+            user = await db_session.get(User, response.json()["id"])
+            user.is_admin = True
+            await db_session.flush()
+        response = await client.post("/auth/login", data={"username": email, "password": password})
+        assert response.status_code == 200
+        return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+    return _make_user

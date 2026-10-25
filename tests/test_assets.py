@@ -4,14 +4,14 @@
 # Tests all asset endpoints:
 #   - Create, list, get, update, delete
 #   - Unauthenticated access is rejected
-#   - Non-owners cannot update other users' assets
+#   - Non-owners cannot update other users' assets; admins can
+#   - Invalid values are rejected with 422, never stored
 # ==============================================================
 
 import pytest
 
 
 class TestAssets:
-
     @pytest.mark.asyncio
     async def test_create_asset_success(self, client, auth_headers):
         """An authenticated user can create an asset."""
@@ -164,3 +164,64 @@ class TestAssets:
         )
         # Regular users get 403 Forbidden
         assert delete_resp.status_code == 403
+
+
+ROUTER = {"name": "Edge Router", "asset_type": "router", "tenant": "Site B"}
+
+
+class TestAssetPermissions:
+    async def test_non_owner_cannot_update_asset(self, client, auth_headers, make_user):
+        """Only the owner (or an admin) may change an asset."""
+        created = await client.post("/assets/", json=ROUTER, headers=auth_headers)
+        stranger = await make_user("stranger@example.com")
+        response = await client.patch(f"/assets/{created.json()['id']}", json={"status": "inactive"}, headers=stranger)
+        assert response.status_code == 403
+
+    async def test_admin_can_update_any_asset(self, client, auth_headers, make_user):
+        created = await client.post("/assets/", json=ROUTER, headers=auth_headers)
+        admin = await make_user("admin@example.com", is_admin=True)
+        response = await client.patch(f"/assets/{created.json()['id']}", json={"status": "maintenance"}, headers=admin)
+        assert response.status_code == 200
+        assert response.json()["status"] == "maintenance"
+
+    async def test_admin_can_delete_asset(self, client, auth_headers, make_user):
+        created = await client.post("/assets/", json=ROUTER, headers=auth_headers)
+        asset_id = created.json()["id"]
+        admin = await make_user("admin@example.com", is_admin=True)
+        response = await client.delete(f"/assets/{asset_id}", headers=admin)
+        assert response.status_code == 204
+        assert (await client.get(f"/assets/{asset_id}", headers=auth_headers)).status_code == 404
+
+
+class TestAssetValidation:
+    @pytest.mark.parametrize("bad_ip", ["10.0.0.300", "router-1", "192.168.1"])
+    async def test_invalid_ip_address_returns_422(self, client, auth_headers, bad_ip):
+        response = await client.post("/assets/", json={**ROUTER, "ip_address": bad_ip}, headers=auth_headers)
+        assert response.status_code == 422
+
+    async def test_ipv6_address_is_stored_in_canonical_form(self, client, auth_headers):
+        response = await client.post("/assets/", json={**ROUTER, "ip_address": "2001:DB8:0:0::1"}, headers=auth_headers)
+        assert response.status_code == 201
+        assert response.json()["ip_address"] == "2001:db8::1"
+
+    @pytest.mark.parametrize("field", ["name", "asset_type", "status", "tenant"])
+    async def test_patch_null_for_required_field_returns_422(self, client, auth_headers, field):
+        """{"tenant": null} must be refused, not sent to a NOT NULL column."""
+        created = await client.post("/assets/", json=ROUTER, headers=auth_headers)
+        response = await client.patch(f"/assets/{created.json()['id']}", json={field: None}, headers=auth_headers)
+        assert response.status_code == 422
+
+    async def test_patch_null_clears_an_optional_field(self, client, auth_headers):
+        created = await client.post("/assets/", json={**ROUTER, "location": "Rack 4"}, headers=auth_headers)
+        response = await client.patch(f"/assets/{created.json()['id']}", json={"location": None}, headers=auth_headers)
+        assert response.status_code == 200
+        assert response.json()["location"] is None
+
+    async def test_list_is_ordered_by_id_for_stable_pages(self, client, auth_headers):
+        for n in range(3):
+            await client.post("/assets/", json={**ROUTER, "name": f"Switch {n}"}, headers=auth_headers)
+        first = (await client.get("/assets/?limit=2", headers=auth_headers)).json()
+        second = (await client.get("/assets/?skip=2&limit=2", headers=auth_headers)).json()
+        ids = [a["id"] for a in first + second]
+        assert ids == sorted(ids)
+        assert len(ids) == len(set(ids))
