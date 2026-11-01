@@ -24,7 +24,7 @@
 # ==============================================================
 # STAGE 1: Builder
 # ==============================================================
-FROM python:3.12-slim AS builder
+FROM python:3.15-slim AS builder
 
 # Set the working directory inside the container
 WORKDIR /build
@@ -45,7 +45,7 @@ RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 # ==============================================================
 # STAGE 2: Final image
 # ==============================================================
-FROM python:3.12-slim
+FROM python:3.15-slim
 
 # PYTHONDONTWRITEBYTECODE: do not write .pyc files (the code is read-only anyway).
 # PYTHONUNBUFFERED: print log lines immediately, so `docker logs` shows them live.
