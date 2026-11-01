@@ -18,7 +18,7 @@ asyncpg==0.32.0             # Async PostgreSQL driver (used by the app and by Al
 alembic[tz]==1.20.1         # Database migration tool; [tz] adds tzdata for "timezone = UTC" in alembic.ini
 
 # --- Configuration ---
-pydantic-settings==2.16.1   # Reads environment variables and .env into a typed Settings class
+pydantic-settings==2.16.2   # Reads environment variables and .env into a typed Settings class
 
 # --- Authentication & Security ---
 pyjwt==2.15.1               # Creates and verifies JWT access tokens
